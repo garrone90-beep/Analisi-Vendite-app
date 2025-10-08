@@ -1,6 +1,11 @@
 # streamlit_app.py
 # -------------------------------------------------------------
-# Dashboard Vendite (Streamlit) – toggle rapido + KPI con variazione % YoY
+# Dashboard Vendite Enoteca (Streamlit)
+# - KPI con variazione % YoY per TUTTE le colonne
+# - Toggle rapido in pagina: Canale (Dettaglio/Ingrosso) e Visualizzazione (Pari periodo/Anno completo)
+# - Ordine: Metriche anno selezionato -> Tabella KPI -> Grafici
+# - Link pubblici Dropbox visibili in sidebar (no toggle lì)
+# - Tutti i grafici a colonne (barre raggruppate)
 # -------------------------------------------------------------
 
 import io
@@ -11,7 +16,7 @@ import plotly.express as px
 import streamlit as st
 from datetime import datetime
 
-st.set_page_config(page_title="Dashboard Vendite", page_icon="🍷", layout="wide")
+st.set_page_config(page_title="Dashboard Vendite Enoteca", page_icon="🍷", layout="wide")
 
 # --- Link pubblici Dropbox (pagina di anteprima) ---
 PUBLIC_DROPBOX_URL_DETTAGLIO_PARIPER = "https://www.dropbox.com/scl/fi/ajoax5i3gthl1kg3ewe3t/AnalisiVendite_Dettaglio_Dashboard_v4.xlsx?rlkey=nfj3kg0s3n6yp206honxfhr1j&dl=0"
@@ -82,11 +87,10 @@ def parse_dashboard_tables(sheets: dict) -> dict:
     kpi = _extract_table(df, kpi_row, kpi_start, len(kpi_headers))
     for c in kpi_headers[1:]:
         kpi[c] = pd.to_numeric(kpi[c], errors="coerce")
-
-    # Aggiungi variazione % YoY sul Fatturato_Netto
-    if "Anno" in kpi.columns and "Fatturato_Netto" in kpi.columns:
-        kpi = kpi.sort_values("Anno")
-        kpi["Var_%_YoY"] = kpi["Fatturato_Netto"].pct_change() * 100
+    # Aggiungi variazione % YoY per TUTTE le colonne numeriche (eccetto 'Anno')
+    kpi = kpi.sort_values("Anno")
+    for col in [c for c in kpi.columns if c != "Anno"]:
+        kpi[f"{col}_YoY%"] = kpi[col].pct_change() * 100
 
     # Fatturato mensile YoY
     def find_monthly_after(row_after: int):
@@ -154,26 +158,30 @@ def parse_dashboard_tables(sheets: dict) -> dict:
     return {"kpi": kpi, "rev": rev, "prod": prod, "tip": tip, "qty": qty, "qty_year": qty_year, "cutoff_text": cutoff_text}
 
 # -------------------- UI --------------------
-st.title("🍷 Dashboard Vendite — KPI con YoY%")
+st.title("Dashboard Vendite Enoteca")
 
+# --- TOGGLE RAPIDI IN PAGINA ---
+left, right = st.columns([1,1])
+with left:
+    try:
+        canale = st.segmented_control("Canale", ["Dettaglio","Ingrosso"], selection="Dettaglio")
+    except Exception:
+        canale = st.radio("Canale", ["Dettaglio","Ingrosso"], horizontal=True, index=0)
+with right:
+    try:
+        visual = st.segmented_control("Visualizzazione", ["Pari periodo","Anno completo"], selection="Pari periodo")
+    except Exception:
+        visual = st.radio("Visualizzazione", ["Pari periodo","Anno completo"], horizontal=True, index=0)
+
+# Sorgenti: sidebar solo per link
 with st.sidebar:
-    st.header("Sorgenti dati")
-    st.markdown("**Link pubblici Dropbox:**")
+    st.header("Sorgenti dati (Dropbox)")
+    st.markdown("**Link pubblici:**")
     st.markdown(f"- Dettaglio (Pari periodo): [link pubblico]({PUBLIC_DROPBOX_URL_DETTAGLIO_PARIPER})")
     st.markdown(f"- Dettaglio (Anno completo): [link pubblico]({PUBLIC_DROPBOX_URL_DETTAGLIO_FULL})")
     st.markdown(f"- Ingrosso (Pari periodo): [link pubblico]({PUBLIC_DROPBOX_URL_INGROSSO_PARIPER})")
     ingr_full_override = st.text_input("Ingrosso (Anno completo) — URL opzionale (raw o dl=1)", "")
     st.caption("Se non imposti l'URL per Ingrosso 'Anno completo', verrà usato il file 'Pari periodo'.")
-
-    canale = st.radio("Canale", ["Dettaglio","Ingrosso"], horizontal=True, index=0)
-    visual_sidebar = st.radio("Visualizzazione (sidebar)", ["Pari periodo","Anno completo"], horizontal=True, index=0)
-
-# Toggle rapido
-try:
-    visual_quick = st.segmented_control("Visualizzazione (toggle rapido)", ["Pari periodo","Anno completo"], selection=visual_sidebar)
-except Exception:
-    visual_quick = st.radio("Visualizzazione (toggle rapido)", ["Pari periodo","Anno completo"], horizontal=True, index=0)
-visual = visual_quick
 
 # Scelta URL
 if canale == "Dettaglio":
@@ -192,42 +200,55 @@ except Exception as e:
     st.error("Errore nel caricamento o parsing: " + str(e))
     st.stop()
 
-# Badge
+# Badge e periodo
 st.markdown(f"**Vista:** {canale} • **{visual}**")
 cutoff_text = parsed.get("cutoff_text","")
 if cutoff_text:
     st.caption(cutoff_text)
 
-# KPI per Anno (tabella + metriche con delta % YoY)
+# ====== 1) METRICHE DELL'ANNO SELEZIONATO (IN PRIMO PIANO) ======
 kpi = parsed["kpi"]
-c1, c2 = st.columns([3,2])
-with c1:
-    st.subheader("KPI per Anno")
-    if not kpi.empty:
-        fmt = {c:"€{:,.2f}" for c in ["Fatturato_Netto","Prezzo_Medio_Articolo","Fatturato_Medio_Mensile","Margine_Stimato"] if c in kpi.columns}
-        if "Var_%_YoY" in kpi.columns:
-            fmt["Var_%_YoY"] = "{:.1f}%"
-        st.dataframe(kpi.style.format(fmt), use_container_width=True)
-    else:
-        st.info("Nessun KPI disponibile.")
-with c2:
-    anni = kpi["Anno"].tolist() if "Anno" in kpi.columns and not kpi.empty else []
-    anno_sel = st.selectbox("Anno per dettaglio KPI", anni, index=len(anni)-1 if anni else 0)
-    if anni:
-        row = kpi.loc[kpi["Anno"]==anno_sel].iloc[0].to_dict()
-        def eur(x):
-            try: return f"€ {float(x):,.2f}"
-            except: return str(x)
-        st.metric("Fatturato netto", eur(row.get("Fatturato_Netto",0)),
-                  delta=(f"{row.get('Var_%_YoY',np.nan):+.1f}%" if not pd.isna(row.get("Var_%_YoY",np.nan)) else None))
-        # Altre metriche senza delta
-        st.metric("N° vendite", int(row.get("Num_Vendite",0)) if row.get("Num_Vendite", None) is not None else "-")
-        st.metric("Prezzo medio articolo", eur(row.get("Prezzo_Medio_Articolo",0)))
-        st.metric("Fatturato medio mensile", eur(row.get("Fatturato_Medio_Mensile",0)))
-        st.metric("Margine stimato (40%)", eur(row.get("Margine_Stimato",0)))
+if not kpi.empty and "Anno" in kpi.columns:
+    anni = kpi["Anno"].tolist()
+    anno_sel = st.select_slider("Anno selezionato", options=anni, value=anni[-1] if len(anni)>0 else None)
+    row = kpi.loc[kpi["Anno"]==anno_sel].iloc[0].to_dict()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    def eur(x): 
+        try: return f"€ {float(x):,.2f}"
+        except: return str(x)
+    with c1:
+        delta = row.get("Fatturato_Netto_YoY%", np.nan)
+        st.metric("Fatturato netto", eur(row.get("Fatturato_Netto",0)), None if (delta is None or np.isnan(delta)) else f"{delta:+.1f}%")
+    with c2:
+        delta = row.get("Num_Vendite_YoY%", np.nan)
+        num = row.get("Num_Vendite", None)
+        st.metric("N° vendite", "-" if num is None or pd.isna(num) else int(num), None if (delta is None or np.isnan(delta)) else f"{delta:+.1f}%")
+    with c3:
+        delta = row.get("Prezzo_Medio_Articolo_YoY%", np.nan)
+        st.metric("Prezzo medio articolo", eur(row.get("Prezzo_Medio_Articolo",0)), None if (delta is None or np.isnan(delta)) else f"{delta:+.1f}%")
+    with c4:
+        delta = row.get("Fatturato_Medio_Mensile_YoY%", np.nan)
+        st.metric("Fatturato medio mensile", eur(row.get("Fatturato_Medio_Mensile",0)), None if (delta is None or np.isnan(delta)) else f"{delta:+.1f}%")
+    with c5:
+        delta = row.get("Margine_Stimato_YoY%", np.nan)
+        st.metric("Margine stimato (40%)", eur(row.get("Margine_Stimato",0)), None if (delta is None or np.isnan(delta)) else f"{delta:+.1f}%")
+else:
+    st.info("Nessun KPI disponibile.")
 
 st.divider()
 
+# ====== 2) TABELLA KPI COMPLETA ======
+if not kpi.empty:
+    st.subheader("KPI per Anno (con variazioni YoY%)")
+    fmt = {c:"€{:,.2f}" for c in ["Fatturato_Netto","Prezzo_Medio_Articolo","Fatturato_Medio_Mensile","Margine_Stimato"] if c in kpi.columns}
+    for c in [col for col in kpi.columns if col.endswith("_YoY%")]:
+        fmt[c] = "{:.1f}%"
+    st.dataframe(kpi.style.format(fmt), use_container_width=True)
+
+st.divider()
+
+# ====== 3) GRAFICI ======
 # Fatturato mensile (barre raggruppate)
 rev = parsed["rev"]
 if not rev.empty:

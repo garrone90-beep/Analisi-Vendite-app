@@ -1,6 +1,10 @@
-# 🍷 Dashboard Vendite — KPI con YoY%
+# 🍷 Dashboard Vendite Enoteca — aggiornamento richiesto
 
-Questa versione aggiunge la **variazione percentuale YoY** nei KPI (basata su `Fatturato_Netto`) e la mostra anche come **delta** nella metrica dell'anno selezionato.
+**Incluso in questa build**
+1) Variazione percentuale **YoY per tutte le colonne** della tabella KPI.
+2) **Toggle rapidi** (in pagina) per Canale e Visualizzazione, rimossi dalla sidebar.
+3) Ordine contenuti: **Metriche anno selezionato** → **Tabella KPI** → **Grafici**.
+4) Titolo: **Dashboard Vendite Enoteca**.
 
 ## Avvio
 ```bash
